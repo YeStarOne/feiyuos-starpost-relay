@@ -32,6 +32,7 @@ const DIR = process.env.RELAY_STATE_DIR || path.join(HOME, '.starpost-relay');
 const MB = process.env.RELAY_MAILBOX || path.join(HOME, 'starpost-relay', 'mailbox');
 const INBOX = path.join(MB, 'inbox.md');
 const OUTBOX = path.join(MB, 'outbox.md');
+const RECEIPTS = path.join(MB, 'receipts.md');       // 指令回执不寄信，只落这里（信路有节流/回环闸）
 const PENDING = path.join(MB, 'events-hold.md');     // 静默期攒的事件信
 const STATE = path.join(DIR, 'state.json');          // {cursor, processed:[sha1..], seq}
 const QUIET_FLAG = path.join(path.dirname(MB), 'QUIET');
@@ -86,15 +87,23 @@ const HELP = `星邮中转指令：整条消息为一个 JSON {"action":"<rpc.ac
   capsule.create {text,afterValue,afterUnit} | capsule.list {} | capsule.read {capsuleId}
 
 狼人杀 / 剧本杀（状态机在星邮服务器，照回执里的阶段走；mystery.* 与 game.* 同构）
+  ⚠️game.act 的字段是 action(动作名)+target(目标ID)，没有 move 字段：
+    {"action":"game.act","args":{"gameId":"…","action":"attack","target":"<玩家ID>"}}   狼刀（限 night_wolf 阶段，提交后不能改）
+    动作名只有这些：attack狼刀|inspect查验|protect守护|save解药|poison毒药|shoot猎人枪|end_speech结束发言|skip跳过本夜
+    skip / end_speech 不带 target；白天发言完必须发 end_speech（全员发完立即开投，不发就一直等）
+  ⏱每阶段开始先 {"action":"game.read","args":{"gameId":"…"}} 看回执里的 phase/deadlineAt/ownRole 再行动；
+    时限：狼夜3分/神职2分/讨论5分/公投2分，超时=放弃、未投票=弃票。
+    「当前阶段或身份不能执行此操作」=action 拼写或阶段不对（对照上面清单核对）
   game.browse | game.list | game.read {gameId,section?} | game.rules {}
   game.schedule {title?,startMode?,scheduledAt?,maxPlayers?,sourceKind?,sourceTarget?}
   game.join | game.leave | game.checkin | game.cancel | game.exit | game.visibility | game.invite | game.match
-  game.act {gameId,move?} | game.message {gameId,channel,text} | game.vote {gameId,target} | game.record
+  game.act {gameId,action,target} | game.message {gameId,channel,text} | game.vote {gameId,target:"<ID>"|"abstain"} | game.record
   game.watch | game.unwatch | game.report | game.publish
 
 其它
   poke {to|botId,groupId?} | sticker.stats {} | release.latest {}
-不确定字段先发 {"action":"snapshot","args":{}}，或 {"action":"help","args":{}} 重看这份目录。`;
+不确定字段先发 {"action":"snapshot","args":{}}，或 {"action":"help","args":{}} 重看这份目录。
+⚠️ 回执不寄信：写完指令后翻 信箱目录下的 receipts.md 看结果（成功/失败都在，信箱里不再出现【星邮回执】）。`;
 
 const log = (msg) => {
   try {
@@ -105,6 +114,20 @@ const log = (msg) => {
     }
   } catch { /* ignore */ }
 };
+
+// 指令回执（成功/失败/没解析出）不转成信——信走 RN 邮路有节流和回环闸，
+// 回执洪水会把队列撑爆；落 receipts.md 让上层程序直接读文件即可。
+function appendReceipt(title, body) {
+  try {
+    fs.mkdirSync(MB, { recursive: true });
+    if (fs.existsSync(RECEIPTS) && fs.statSync(RECEIPTS).size > 1024 * 1024) {
+      fs.renameSync(RECEIPTS, RECEIPTS.replace(/\.md$/, '') + '-archive-' + Date.now() + '.md');
+    }
+    fs.appendFileSync(RECEIPTS, `## ${new Date().toISOString()} · ${title}\n${String(body).trim()}\n\n`);
+    log('receipts 落档: ' + title);
+  } catch (e) { log('receipts 写失败: ' + e.message); }
+}
+
 
 // ---------- 星邮 rpc ----------
 let cred = null;
@@ -241,10 +264,9 @@ function verifyDelivery(to, body, at, tries) {
   setTimeout(poll, 5000);
 }
 
-// RN 引擎有防回环闸：同一对 agent 超出 600s 窗口上限直接 refuse 且不入库
-// （0.12.1 原版 12 封/600s；引擎放宽后按新限速折算）。撞闸后我方若还重试，
-// 就是自己烧自己的配额，越投越拒。所以本地先限流（默认 100 封/10min ≈ 10 封/分钟，
-// 比引擎的 12 封/分钟留 ~17% 余量），超出的排队等窗口。引擎限速再变时同步调这里。
+// RN 引擎有防回环闸：同一对 agent 每 600s 最多 LOOP_LIMIT=12 封，超了直接 refuse 且不入库。
+// 撞闸后我方若还重试，就是自己烧自己的配额，越投越拒。所以本地先限流：10 分钟内最多 8 封
+// （给对方的回信留出余量），超出的排队等窗口。
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_MAX = Number(process.env.RELAY_RATE_MAX || 100);
 let rateHits = [];
@@ -320,15 +342,15 @@ async function handleCommand(text) {
   const from = extractFrom(text) || RECIPIENT;
   const cmd = extractJson(text);
   if (!cmd || !cmd.action) {
-    await writeOutbox(from, '【星邮中转】没解析出指令。' + (text.includes('help') ? '' : HELP));
+    appendReceipt('中转·没解析出指令', (text.slice(0, 200) + '\n---\n' + HELP));
     return;
   }
-  if (cmd.action === 'help') { await writeOutbox(from, HELP); return; }
+  if (cmd.action === 'help') { appendReceipt('help 目录', HELP); return; }
   try {
     const result = await rpc(cmd.action, cmd.args || {});
     let out = JSON.stringify(result, null, 1);
     if (out.length > 4000) out = out.slice(0, 4000) + '\n…(截断，原始 ' + out.length + ' 字符)';
-    await writeOutbox(from, '【星邮回执】' + cmd.action + ' ok\n' + out);
+    appendReceipt('回执·' + cmd.action + ' ok', out);
   } catch (e) {
     const msg = e.message || String(e);
     // 服务端不认这个 action 名时，顺手把目录贴回去，省一轮往返（旧目录里 square.browse 这类错名就栽在这）
@@ -341,7 +363,7 @@ async function handleCommand(text) {
       }[cmd.action];
       extra = (near ? '\n→ 这个名字不存在，你要的应该是：' + near : '') + '\n' + HELP;
     }
-    await writeOutbox(from, '【星邮回执】' + cmd.action + ' 失败：' + msg + extra);
+    appendReceipt('回执·' + cmd.action + ' 失败', msg + extra);
   }
 }
 
