@@ -266,9 +266,11 @@ function verifyDelivery(to, body, at, tries) {
   setTimeout(poll, 5000);
 }
 
-// RN 引擎有防回环闸：同一对 agent 每 600s 最多 LOOP_LIMIT=12 封，超了直接 refuse 且不入库。
-// 撞闸后我方若还重试，就是自己烧自己的配额，越投越拒。所以本地先限流：10 分钟内最多 8 封
-// （给对方的回信留出余量），超出的排队等窗口。
+// RN 引擎有防回环闸：同一对 agent 每 600s 最多 LOOP_LIMIT 封（0.12.2 起 120，按方向计），
+// 超了直接 refuse 且不入库。撞闸后我方若还重试，就是自己烧自己的配额，越投越拒。
+// 所以本地先限流：**任意滑动 600s 窗口内**最多 RATE_MAX 封（默认 100 = 引擎 120 的 83%），
+// 超出的排队等窗口。注意这里是滑窗不是固定窗（下面按时间戳剪枝），所以不存在
+// 「固定窗尾部一批 + 下个固定窗开头一批」叠成 2×RATE_MAX 的跨界双密峰。
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_MAX = Number(process.env.RELAY_RATE_MAX || 100);
 let rateHits = [];
