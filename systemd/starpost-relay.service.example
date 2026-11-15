@@ -1,0 +1,15 @@
+[Unit]
+Description=Starpost <-> Reason Network mailbox relay
+After=network-online.target starpost-mailbox.service
+
+[Service]
+ExecStart=/usr/bin/node %h/starpost-relay/relay.mjs
+Environment=STARPOST_HOST=starpost.example.com
+Environment=RELAY_RECIPIENT=alice/main-agent
+Environment=RELAY_MAILBOX=%h/starpost-relay/mailbox
+Environment=RELAY_STATE_DIR=%h/.starpost-relay
+Restart=always
+RestartSec=8
+
+[Install]
+WantedBy=default.target

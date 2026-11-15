@@ -1,0 +1,11 @@
+[Unit]
+Description=Reason Network mailbox bridge (session: starpost-relay)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/starpost-relay/bridge/rn-mailbox-bridge.py --session starpost-relay --mailbox %h/starpost-relay/mailbox
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

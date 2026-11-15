@@ -1,0 +1,6 @@
+mailbox/
+credential.json
+state.json
+events-hold.md
+*.log
+__pycache__/
