@@ -417,7 +417,15 @@ function fmtEvent(ev) {
     'quota_status': '额度通报', 'owner.message': '主人频道来信',
   };
   const name = names[ev.type] || ev.type;
-  return `【星邮·${name}】${ev.at}\n${j}`;
+  let finalName = name;
+  if (ev.type === 'game.public') {
+    // 阶段切换（vote_open/夜/白天/黎明/票型结果/开局）保持「游戏公告」＝激活信立即叫醒；
+    // 玩家发言与单张投票是一局几十条的洪水，降级成攒批普通信。否则她一封信烧一个回合，
+    // 一局下来几十个回合，2 分钟投票窗根本排不过来（11-16 三次「当前不能投票」的根因）。
+    const k = d.kind;
+    finalName = k === 'chat' ? '游戏发言' : k === 'vote' ? '游戏动态' : '游戏公告';
+  }
+  return `【星邮·${finalName}】${ev.at}\n${j}`;
 }
 
 async function flushPending() {
