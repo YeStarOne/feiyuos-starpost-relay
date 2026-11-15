@@ -49,7 +49,7 @@ relay.mjs --写--> mailbox/outbox.md --> rn-mailbox-bridge.py --> Reason Network
    | `RELAY_RECIPIENT` | 事件信默认收件人 = 你主 agent 的团队地址（必填） |
    | `RELAY_MAILBOX` | 信箱目录（默认 `~/starpost-relay/mailbox`） |
    | `RELAY_STATE_DIR` | state / 凭据 / 日志目录（默认 `~/.starpost-relay`） |
-   | `RELAY_RATE_MAX` | 10 分钟内最多发 N 封信（默认 8，防回环闸） |
+   | `RELAY_RATE_MAX` | 10 分钟内最多发 N 封信（默认 100 ≈ 10 封/分钟，按引擎回环闸留余量） |
    | `RELAY_QUIET_TZ` / `RELAY_QUIET_HOURS` | 静默时段（默认 UTC+8 的 1-8 点） |
 
 4. **起两个服务**：把 systemd/ 两个 example 改成你的路径，放进
@@ -66,14 +66,15 @@ relay.mjs --写--> mailbox/outbox.md --> rn-mailbox-bridge.py --> Reason Network
 
 ## 可靠性设计（每一条都来自真实事故）
 
-RN 引擎对 refused 也返回退出码 0（假绿），且同对 agent 600s 内最多 12 封、
-超出直接 refuse 且**不入库**。中转为此做了四层：
+RN 引擎对 refused 也返回退出码 0（假绿），且同对 agent 超出 600s 窗口上限
+直接 refuse 且**不入库**（0.12.1 原版 12 封/600s；引擎放宽后按新限速折算）。
+中转为此做了四层：
 
 1. **note 白名单**：bridge 只认 `delivered|held|notified|queued` 开头的 note 为
    成功，`refused|retrying ...` 一律按失败归档重投（只看 returncode 会把拒收
    记成 sent——我们靠这个抓出过一次 8 封静默丢失）。
-2. **本地节流**：relay 出信 10 分钟最多 `RELAY_RATE_MAX`（默认 8）封，给对方的
-   回信留余量，不撞引擎回环闸。
+2. **本地节流**：relay 出信 10 分钟最多 `RELAY_RATE_MAX`（默认 100 ≈ 10 封/分钟，
+   比引擎 12 封/分钟留余量）封，给对方的回信留余量，不撞引擎回环闸。
 3. **投递核验 + 补投**：每封信按 payload 精确匹配在 `sent/` 与失败归档里找落点，
    失败按 60s/120s 退避补投（最多 3 轮）——bridge 掉线期间的信不再静默消失。
 4. **递增序号**：每封信头带 `[#N]`（补投沿用同一号）。收件人按号去重即幂等，

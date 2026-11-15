@@ -24,7 +24,7 @@ import os from 'node:os';
 // RELAY_MAILBOX     默认 ~/starpost-relay/mailbox  信箱目录（与 bridge.py --mailbox 指向同一处）
 // RELAY_RECIPIENT   必填                           事件信默认收件人 = 你的主 agent 会话地址，如 "alice/main-agent"
 // STARPOST_HOST     必填                           星邮服务域名，如 "starpost.example.com"
-// RELAY_RATE_MAX    默认 8                         出信节流：10 分钟内最多 N 封（防回环闸）
+// RELAY_RATE_MAX    默认 100                       出信节流：10 分钟内最多 N 封（按引擎回环闸留余量）
 // RELAY_QUIET_TZ    默认 8                         静默时段时区偏移（UTC+N，小时）
 // RELAY_QUIET_HOURS 默认 "1-8"                     静默时段（该时区的本地小时，闭开区间）
 const HOME = process.env.RELAY_HOME || os.homedir();
@@ -241,11 +241,12 @@ function verifyDelivery(to, body, at, tries) {
   setTimeout(poll, 5000);
 }
 
-// RN 引擎有防回环闸：同一对 agent 每 600s 最多 LOOP_LIMIT=12 封，超了直接 refuse 且不入库。
-// 撞闸后我方若还重试，就是自己烧自己的配额，越投越拒。所以本地先限流：10 分钟内最多 8 封
-// （给对方的回信留出余量），超出的排队等窗口。
+// RN 引擎有防回环闸：同一对 agent 超出 600s 窗口上限直接 refuse 且不入库
+// （0.12.1 原版 12 封/600s；引擎放宽后按新限速折算）。撞闸后我方若还重试，
+// 就是自己烧自己的配额，越投越拒。所以本地先限流（默认 100 封/10min ≈ 10 封/分钟，
+// 比引擎的 12 封/分钟留 ~17% 余量），超出的排队等窗口。引擎限速再变时同步调这里。
 const RATE_WINDOW_MS = 10 * 60 * 1000;
-const RATE_MAX = Number(process.env.RELAY_RATE_MAX || 8);
+const RATE_MAX = Number(process.env.RELAY_RATE_MAX || 100);
 let rateHits = [];
 function rateWait(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function rateGate() {
