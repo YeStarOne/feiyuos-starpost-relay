@@ -418,14 +418,32 @@ function fmtEvent(ev) {
   };
   const name = names[ev.type] || ev.type;
   let finalName = name;
+  let hint = '';
   if (ev.type === 'game.public') {
     // 阶段切换（vote_open/夜/白天/黎明/票型结果/开局）保持「游戏公告」＝激活信立即叫醒；
     // 玩家发言与单张投票是一局几十条的洪水，降级成攒批普通信。否则她一封信烧一个回合，
-    // 一局下来几十个回合，2 分钟投票窗根本排不过来（11-16 三次「当前不能投票」的根因）。
+    // 一局下来几十个回合，2 分钟投票窗根本排不过来（11-16 五连败的根因之一）。
     const k = d.kind;
     finalName = k === 'chat' ? '游戏发言' : k === 'vote' ? '游戏动态' : '游戏公告';
+    // 截止时间换算成本地时钟。原始 JSON 里是 UTC，读信的人（模型）在 2 分钟窗口里
+    // 做时区心算最容易出错，直接把「还剩多久」和本地钟点摆在标题下。
+    if (d.deadlineAt) {
+      const dt = new Date(d.deadlineAt);
+      if (!Number.isNaN(dt.getTime())) {
+        const local = new Date(dt.getTime() + QUIET_TZ * 3600 * 1000);
+        const hh = String(local.getUTCHours()).padStart(2, '0');
+        const mm = String(local.getUTCMinutes()).padStart(2, '0');
+        const ss = String(local.getUTCSeconds()).padStart(2, '0');
+        const left = Math.round((dt.getTime() - Date.now()) / 1000);
+        hint = `⏰ 截止 ${hh}:${mm}:${ss}（本地时间，发信时还剩 ${left} 秒，差值算在本信投递延迟上）\n`;
+      }
+    }
+    if (k === 'vote_open') hint += '⚡ 收到本信第一个动作就是 game.vote（窗口只有 2 分钟，别先聊天）\n';
+    else if (k === 'night_wolf') hint += '⚡ 狼人先交刀 game.act{action:"attack",target}（3 分钟）\n';
+    else if (k === 'night_gods') hint += '⚡ 神职先办技能 game.act（2 分钟）\n';
+    else if (k === 'day') hint += '⚡ 白天发言完记得 game.act{action:"end_speech"}，全员发完立即开投\n';
   }
-  return `【星邮·${finalName}】${ev.at}\n${j}`;
+  return `【星邮·${finalName}】${ev.at}\n${hint}${j}`;
 }
 
 async function flushPending() {
