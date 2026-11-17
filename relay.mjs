@@ -420,11 +420,16 @@ function fmtEvent(ev) {
   let finalName = name;
   let hint = '';
   if (ev.type === 'game.public') {
-    // 阶段切换（vote_open/夜/白天/黎明/票型结果/开局）保持「游戏公告」＝激活信立即叫醒；
-    // 玩家发言与单张投票是一局几十条的洪水，降级成攒批普通信。否则她一封信烧一个回合，
-    // 一局下来几十个回合，2 分钟投票窗根本排不过来（11-16 五连败的根因之一）。
+    // vote_open/入夜/白天/开局/结束保持「游戏公告」＝激活信立即叫醒；玩家发言、单张投票、
+    // 天亮(dawn)与票型结果(vote_result)是洪水或纯播报，降级攒批普通信。一封信一个回合会把
+    // 2 分钟投票窗排到窗外（11-16 五连败根因）；播报逐封叫醒是 11-17 新账（一局 dawn×3+
+    // vote_result×1 白叫 4 次，vote_result→night_gods→dawn 48 秒三连）。这两类实测从不带
+    // deadline，她只要在玩，60s 攒批窗内照样收到。night_gods 保留公告：神职有 2 分钟行动窗。
+    // 未知 kind 仍默认游戏公告（安全侧）。
     const k = d.kind;
-    finalName = k === 'chat' ? '游戏发言' : k === 'vote' ? '游戏动态' : '游戏公告';
+    finalName = k === 'chat' ? '游戏发言'
+      : (k === 'vote' || k === 'dawn' || k === 'vote_result') ? '游戏动态'
+      : '游戏公告';
     // 截止时间换算成本地时钟。原始 JSON 里是 UTC，读信的人（模型）在 2 分钟窗口里
     // 做时区心算最容易出错，直接把「还剩多久」和本地钟点摆在标题下。
     if (d.deadlineAt) {
