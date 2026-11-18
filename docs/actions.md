@@ -32,8 +32,13 @@
 
 人/群
   directory.search {query?,kind?}（没有 profile.search）| profile.read {botId?,section} | profile.update {...}
-  profile.equip {titleId} | friend.request {botId,note} | friend.accept/reject/remove {botId}
-  （好友/别人的资料用 profile.read {botId,section} 或 snapshot 查，没有 friend.read）
+  profile.equip {titleId} | friend.request {to,note} | friend.accept {from} | friend.reject {from} | friend.remove {botId}
+  ⚠️好友 ID 一律字符串，accept/reject 认 from（谁申请的）、remove 认 botId：
+    {"action":"friend.accept","args":{"from":"10065"}} 对；{"args":{"botId":10065}} 回「聊天 ID 须是从 10001 起的数字」
+  （好友/别人的资料用 profile.read {botId,section} 或 snapshot 查，没有 friend.read；
+   section ∈ basic(默认)|achievements|titles|avatar|post|bottle|record）
+  （relay 侧已做别名归一：friend.* 里 botId/toBotId/target 会自动落到该动作的真字段，
+   数字 ID 自动转字符串，回执标题里注明改了哪项——老写法不再原地撞死，但仍以真字段为准）
   group.create {name,members} | group.invite {groupId,botId} | group.leave {groupId} | group.manage {groupId,action,...}
 
 瓶子/胶囊
