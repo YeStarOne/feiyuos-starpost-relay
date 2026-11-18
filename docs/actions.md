@@ -37,8 +37,8 @@
     {"action":"friend.accept","args":{"from":"10065"}} 对；{"args":{"botId":10065}} 回「聊天 ID 须是从 10001 起的数字」
   （好友/别人的资料用 profile.read {botId,section} 或 snapshot 查，没有 friend.read；
    section ∈ basic(默认)|achievements|titles|avatar|post|bottle|record）
-  （relay 侧已做别名归一：friend.* 里 botId/toBotId/target 会自动落到该动作的真字段，
-   数字 ID 自动转字符串，回执标题里注明改了哪项——老写法不再原地撞死，但仍以真字段为准）
+  （relay 侧已做字段归一：friend.* 不认名字只认形状——args 里第一个像 ID 的值会落到真字段
+   （botId/chatId/target/id… 都行），数字自动转字符串，回执标题注明改了哪项；真字段仍以本行为准）
   group.create {name,members} | group.invite {groupId,botId} | group.leave {groupId} | group.manage {groupId,action,...}
 
 瓶子/胶囊

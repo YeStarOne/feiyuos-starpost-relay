@@ -369,20 +369,25 @@ function extractFrom(text) {
 // 以为「好友接口闹脾气」——其实是我这份目录写错了字段名。这里做别名归一 + 数字转字符串，
 // 并在回执里写明改了什么，不做无声魔法。
 const FRIEND_FIELDS = {
-  'friend.request': ['to', ['botId', 'toBotId', 'target', 'id', 'from']],
-  'friend.accept':  ['from', ['botId', 'fromBotId', 'toBotId', 'target', 'id', 'to']],
-  'friend.reject':  ['from', ['botId', 'fromBotId', 'toBotId', 'target', 'id', 'to']],
-  'friend.remove':  ['botId', ['from', 'to', 'target', 'id', 'fromBotId']],
+  'friend.request': 'to',
+  'friend.accept':  'from',
+  'friend.reject':  'from',
+  'friend.remove':  'botId',
 };
+const ID_LIKE = v => (typeof v === 'number' && Number.isSafeInteger(v)) ||
+  (typeof v === 'string' && /^\d{5,12}$/.test(v.trim()));
 function normalizeArgs(action, args) {
-  const spec = FRIEND_FIELDS[action];
-  if (!spec) return { args, note: '' };
-  const [key, aliases] = spec;
+  const key = FRIEND_FIELDS[action];
+  if (!key) return { args, note: '' };
   const out = { ...args };
   let note = '';
   if (out[key] == null) {
-    for (const a of aliases) {
-      if (args[a] != null) { out[key] = args[a]; delete out[a]; note = '（已把 ' + a + ' 当作 ' + key + '）'; break; }
+    // 字段名她记不住——实测同一件事她先后用过 botId/toBotId/chatId/target/id 五种名字，
+    // 枚举别名等于赌她这次写哪个（21:41 她用 target 蒙对、chatId 和 id 连着失败）。
+    // 所以不猜名字、只认形状：取第一个长得像 ID 的值，落到该动作的真字段上。
+    for (const [k, v] of Object.entries(out)) {
+      if (k === 'note') continue;
+      if (ID_LIKE(v)) { out[key] = v; delete out[k]; note = '（已把 ' + k + ' 当作 ' + key + '）'; break; }
     }
   }
   if (typeof out[key] === 'number') { out[key] = String(out[key]); note += '（' + key + ' 数字已转字符串）'; }
